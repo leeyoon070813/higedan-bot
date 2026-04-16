@@ -5,11 +5,11 @@ const { Client, GatewayIntentBits } = require("discord.js");
 const TOKEN = process.env.TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 const COLLECTION_HANDLE = "one-man-tour-2026";
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 const app = express();
 app.get("/", (req, res) => {
-  res.send("higedan restock bot is running");
+  res.status(200).send("higedan restock bot is running");
 });
 app.listen(PORT, () => {
   console.log(`HTTP server listening on port ${PORT}`);
@@ -58,6 +58,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 5) {
 async function getCollectionProducts() {
   const now = Date.now();
 
+  // 1시간 캐시
   if (cachedProducts && now - cachedAt < 60 * 60 * 1000) {
     return cachedProducts;
   }
@@ -92,6 +93,22 @@ async function getCollectionProducts() {
   return products;
 }
 
+async function sendRestockMessage(channel, product, variant, isInitial = false) {
+  const variantName =
+    variant.title && variant.title !== "Default Title"
+      ? ` - ${variant.title}`
+      : "";
+
+  const prefix = isInitial ? "🎉 재고 있음(초기 감지)!" : "🎉 재입고!";
+
+  const message =
+    `${prefix}\n` +
+    `${product.title}${variantName}\n` +
+    `https://higedan-store.jp/en/products/${product.handle}`;
+
+  await channel.send(message);
+}
+
 async function checkRestock() {
   if (isRunning) {
     console.log("이전 작업이 아직 실행 중이라 이번 주기는 건너뜀");
@@ -110,24 +127,23 @@ async function checkRestock() {
         const currentAvailable = Boolean(variant.available);
         const prevAvailable = lastAvailability[key];
 
+        // 서버 재시작 등으로 상태가 비어 있으면:
+        // 현재 재고가 있는 경우 초기 감지 알림 발송
         if (prevAvailable === undefined) {
+          if (currentAvailable === true) {
+            await sendRestockMessage(channel, product, variant, true);
+            console.log(`초기 재고 감지: ${product.title} - ${variant.title}`);
+            await sleep(1500);
+          }
+
           lastAvailability[key] = currentAvailable;
           continue;
         }
 
+        // 품절(false) -> 재입고(true)
         if (prevAvailable === false && currentAvailable === true) {
-          const variantName =
-            variant.title && variant.title !== "Default Title"
-              ? ` - ${variant.title}`
-              : "";
-
-          const message =
-            `🎉 재입고!\n` +
-            `${product.title}${variantName}\n` +
-            `https://higedan-store.jp/en/products/${product.handle}`;
-
-          await channel.send(message);
-          console.log(`재입고 감지: ${product.title}${variantName}`);
+          await sendRestockMessage(channel, product, variant, false);
+          console.log(`재입고 감지: ${product.title} - ${variant.title}`);
           await sleep(1500);
         }
 
@@ -150,4 +166,6 @@ client.once("clientReady", async () => {
   setInterval(checkRestock, 600000); // 10분
 });
 
-client.login(TOKEN);
+client.login(TOKEN).catch(err => {
+  console.error("디스코드 로그인 실패:", err);
+});
