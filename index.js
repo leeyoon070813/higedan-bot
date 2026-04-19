@@ -8,9 +8,11 @@ const COLLECTION_HANDLE = "one-man-tour-2026";
 const PORT = process.env.PORT || 10000;
 
 const app = express();
+
 app.get("/", (req, res) => {
   res.status(200).send("higedan restock bot is running");
 });
+
 app.listen(PORT, () => {
   console.log(`HTTP server listening on port ${PORT}`);
 });
@@ -20,8 +22,6 @@ const client = new Client({
 });
 
 let lastAvailability = {};
-let cachedProducts = null;
-let cachedAt = 0;
 let isRunning = false;
 
 function sleep(ms) {
@@ -56,13 +56,6 @@ async function fetchWithRetry(url, options = {}, maxRetries = 5) {
 }
 
 async function getCollectionProducts() {
-  const now = Date.now();
-
-  // 1시간 캐시
-  if (cachedProducts && now - cachedAt < 60 * 60 * 1000) {
-    return cachedProducts;
-  }
-
   let products = [];
   let page = 1;
 
@@ -86,10 +79,7 @@ async function getCollectionProducts() {
     await sleep(3000);
   }
 
-  cachedProducts = products;
-  cachedAt = now;
-
-  console.log(`컬렉션 상품 캐시 완료: ${products.length}개`);
+  console.log(`컬렉션 상품 새로 조회 완료: ${products.length}개`);
   return products;
 }
 
@@ -127,8 +117,6 @@ async function checkRestock() {
         const currentAvailable = Boolean(variant.available);
         const prevAvailable = lastAvailability[key];
 
-        // 서버 재시작 등으로 상태가 비어 있으면:
-        // 현재 재고가 있는 경우 초기 감지 알림 발송
         if (prevAvailable === undefined) {
           if (currentAvailable === true) {
             await sendRestockMessage(channel, product, variant, true);
@@ -140,7 +128,6 @@ async function checkRestock() {
           continue;
         }
 
-        // 품절(false) -> 재입고(true)
         if (prevAvailable === false && currentAvailable === true) {
           await sendRestockMessage(channel, product, variant, false);
           console.log(`재입고 감지: ${product.title} - ${variant.title}`);
