@@ -115,13 +115,13 @@ async function checkRestock() {
         const currentAvailable = Boolean(variant.available);
         const prevAvailable = lastAvailability[key];
 
-        // 첫 실행은 기준값 저장만 하고 알림 안 보냄
+        // 첫 실행은 기준값 저장만
         if (prevAvailable === undefined) {
           lastAvailability[key] = currentAvailable;
           continue;
         }
 
-        // 품절(false) -> 재입고(true)일 때만 알림
+        // 품절 → 재입고만 알림
         if (prevAvailable === false && currentAvailable === true) {
           await sendRestockMessage(channel, product, variant);
           console.log(`재입고 감지: ${product.title} - ${variant.title}`);
@@ -143,11 +143,8 @@ async function checkRestock() {
 client.once("clientReady", async () => {
   console.log(`로그인 완료: ${client.user.tag}`);
 
-  const channel = await client.channels.fetch(CHANNEL_ID);
-  await channel.send("✅ 테스트 메시지: 히게단 재입고 봇 정상 작동 중");
-
   await checkRestock();
-  setInterval(checkRestock, 300000); // 5분
+  setInterval(checkRestock, 300000); // ⏱️ 5분
 });
 
 client.login(TOKEN).catch(err => {
