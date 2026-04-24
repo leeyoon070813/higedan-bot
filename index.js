@@ -83,16 +83,14 @@ async function getCollectionProducts() {
   return products;
 }
 
-async function sendRestockMessage(channel, product, variant, isInitial = false) {
+async function sendRestockMessage(channel, product, variant) {
   const variantName =
     variant.title && variant.title !== "Default Title"
       ? ` - ${variant.title}`
       : "";
 
-  const prefix = isInitial ? "🎉 재고 있음(초기 감지)!" : "🎉 재입고!";
-
   const message =
-    `${prefix}\n` +
+    `🎉 재입고!\n` +
     `${product.title}${variantName}\n` +
     `https://higedan-store.jp/en/products/${product.handle}`;
 
@@ -117,19 +115,15 @@ async function checkRestock() {
         const currentAvailable = Boolean(variant.available);
         const prevAvailable = lastAvailability[key];
 
+        // 첫 실행은 기준값 저장만 하고 알림 안 보냄
         if (prevAvailable === undefined) {
-          if (currentAvailable === true) {
-            await sendRestockMessage(channel, product, variant, true);
-            console.log(`초기 재고 감지: ${product.title} - ${variant.title}`);
-            await sleep(1500);
-          }
-
           lastAvailability[key] = currentAvailable;
           continue;
         }
 
+        // 품절(false) -> 재입고(true)일 때만 알림
         if (prevAvailable === false && currentAvailable === true) {
-          await sendRestockMessage(channel, product, variant, false);
+          await sendRestockMessage(channel, product, variant);
           console.log(`재입고 감지: ${product.title} - ${variant.title}`);
           await sleep(1500);
         }
@@ -149,8 +143,11 @@ async function checkRestock() {
 client.once("clientReady", async () => {
   console.log(`로그인 완료: ${client.user.tag}`);
 
+  const channel = await client.channels.fetch(CHANNEL_ID);
+  await channel.send("✅ 테스트 메시지: 히게단 재입고 봇 정상 작동 중");
+
   await checkRestock();
-  setInterval(checkRestock, 600000); // 10분
+  setInterval(checkRestock, 300000); // 5분
 });
 
 client.login(TOKEN).catch(err => {
