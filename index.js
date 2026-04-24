@@ -131,7 +131,7 @@ async function checkRestock() {
         const currentAvailable = Boolean(variant.available);
         const prevAvailable = lastAvailability[key];
 
-        // 첫 실행은 기준값 저장만, 알림 안 보냄
+        // 첫 실행은 기준값 저장만
         if (prevAvailable === undefined) {
           lastAvailability[key] = currentAvailable;
           continue;
@@ -158,8 +158,6 @@ async function checkRestock() {
 
 async function startBot() {
   console.log("텔레그램 재입고 봇 시작");
-
-  await sendTelegramMessage("✅ 히게단 텔레그램 재입고 봇 정상 작동 중");
 
   await checkRestock();
   setInterval(checkRestock, 300000); // 5분
