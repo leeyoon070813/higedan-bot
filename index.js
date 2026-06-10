@@ -129,10 +129,9 @@ https://thevault.bstage.in/shop/kr/products/${productId}`
 async function start() {
   console.log("The Vault bot start");
 
-  // 즉시 1회 실행
-  await checkStock();
+  await sendTelegram("🧪 테스트 메시지"); // 👈 이거 추가
 
-  // 1분 주기
+  await checkStock();
   setInterval(checkStock, 60000);
 }
 
