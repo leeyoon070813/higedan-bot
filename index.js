@@ -79,8 +79,10 @@ async function checkStock() {
         if (!data || !data.options) continue;
 
         const option = data.options[0];
-        const out = option.outOfStock;
-        const key = `${productId}_${group.key}`;
+	const out = option.outOfStock;
+	const key = `${productId}_${group.key}`;
+
+	console.log(productId, group.label, out);
 
         // 최초 상태 저장
         if (lastState[key] === undefined) {
