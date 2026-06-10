@@ -160,12 +160,7 @@ async function startBot() {
   console.log("텔레그램 재입고 봇 시작");
 
   await checkRestock();
-  setInterval(checkRestock, 300000); // 5분
+  setInterval(checkRestock, 180000); // 3분
 }
-
-sendTelegramMessage("🧪 텔레그램 테스트")
-  .then(() => console.log("테스트 전송 성공"))
-  .catch(console.error);
-
 
 startBot();
