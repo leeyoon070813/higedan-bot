@@ -4,163 +4,123 @@ const express = require("express");
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-const COLLECTION_HANDLE = "one-man-tour-2026";
 const PORT = process.env.PORT || 10000;
+
+// 감시 대상 상품
+const PRODUCTS = [157, 158, 159, 162, 163, 166];
+
+// 6/20 (N), 6/21 (P)
+const GROUP_KEYS = [
+  { key: "01KTJEB74R10YM86EW4G97GX5N", label: "6/20" },
+  { key: "01KTJEB74R10YM86EW4G97GX5P", label: "6/21" }
+];
 
 const app = express();
 
 app.get("/", (req, res) => {
-  res.status(200).send("higedan telegram restock bot is running");
+  res.status(200).send("The Vault restock bot running");
 });
 
 app.listen(PORT, () => {
   console.log(`HTTP server listening on port ${PORT}`);
 });
 
-let lastAvailability = {};
+// 상태 저장
+let lastState = {};
 let isRunning = false;
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+// sleep
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function fetchWithRetry(url, options = {}, maxRetries = 5) {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const res = await fetch(url, {
-      ...options,
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json",
-        ...(options.headers || {})
-      }
-    });
-
-    if (res.status !== 429) {
-      return res;
-    }
-
-    const retryAfter = res.headers.get("retry-after");
-    const waitMs = retryAfter
-      ? Number(retryAfter) * 1000
-      : Math.min(30000, 5000 * (attempt + 1));
-
-    console.log(`429 발생: ${waitMs}ms 대기 후 재시도`);
-    await sleep(waitMs);
-  }
-
-  throw new Error("429가 반복되어 요청 실패");
-}
-
-async function sendTelegramMessage(text) {
+// 텔레그램 전송
+async function sendTelegram(text) {
   const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
 
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       chat_id: TELEGRAM_CHAT_ID,
-      text: text,
+      text,
       disable_web_page_preview: false
     })
   });
 
   if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`텔레그램 전송 실패: ${res.status} ${errorText}`);
+    console.log(await res.text());
   }
 }
 
-async function getCollectionProducts() {
-  let products = [];
-  let page = 1;
+// API 호출
+async function fetchProduct(productId, groupKey) {
+  const url = `https://thevault.bstage.in/svc/shop/api/v1/products/${productId}/options?inventoryItemGroupKey=${groupKey}`;
 
-  while (true) {
-    const url = `https://higedan-store.jp/en/collections/${COLLECTION_HANDLE}/products.json?limit=250&page=${page}`;
-    const res = await fetchWithRetry(url);
-
-    if (!res.ok) {
-      throw new Error(`컬렉션 조회 실패: ${res.status}`);
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      "Accept": "application/json"
     }
+  });
 
-    const data = await res.json();
+  if (!res.ok) return null;
 
-    if (!data.products || data.products.length === 0) {
-      break;
-    }
-
-    products = products.concat(data.products);
-    page++;
-
-    await sleep(3000);
-  }
-
-  console.log(`컬렉션 상품 새로 조회 완료: ${products.length}개`);
-  return products;
+  return res.json();
 }
 
-async function sendRestockMessage(product, variant) {
-  const variantName =
-    variant.title && variant.title !== "Default Title"
-      ? ` - ${variant.title}`
-      : "";
-
-  const message =
-    `🎉 재입고!\n` +
-    `${product.title}${variantName}\n` +
-    `https://higedan-store.jp/en/products/${product.handle}`;
-
-  await sendTelegramMessage(message);
-}
-
-async function checkRestock() {
-  if (isRunning) {
-    console.log("이전 작업이 아직 실행 중이라 이번 주기는 건너뜀");
-    return;
-  }
-
+// 재고 체크
+async function checkStock() {
+  if (isRunning) return;
   isRunning = true;
 
   try {
-    const products = await getCollectionProducts();
+    for (const productId of PRODUCTS) {
+      for (const group of GROUP_KEYS) {
+        const data = await fetchProduct(productId, group.key);
+        if (!data || !data.options) continue;
 
-    for (const product of products) {
-      for (const variant of product.variants) {
-        const key = String(variant.id);
-        const currentAvailable = Boolean(variant.available);
-        const prevAvailable = lastAvailability[key];
+        const option = data.options[0];
+        const out = option.outOfStock;
+        const key = `${productId}_${group.key}`;
 
-        // 첫 실행은 기준값 저장만
-        if (prevAvailable === undefined) {
-          lastAvailability[key] = currentAvailable;
+        // 최초 상태 저장
+        if (lastState[key] === undefined) {
+          lastState[key] = out;
           continue;
         }
 
-        // 품절 → 재입고만 알림
-        if (prevAvailable === false && currentAvailable === true) {
-          await sendRestockMessage(product, variant);
-          console.log(`재입고 감지: ${product.title} - ${variant.title}`);
-          await sleep(1500);
+        // 품절(true) → 재입고(false)
+        if (lastState[key] === true && out === false) {
+          const msg =
+`🎉 재입고 감지
+
+상품: ${data.productName}
+날짜: ${group.label}
+https://thevault.bstage.in/shop/kr/products/${productId}`;
+
+          await sendTelegram(msg);
+          console.log("재입고:", productId, group.label);
+
+          await sleep(1000);
         }
 
-        lastAvailability[key] = currentAvailable;
+        lastState[key] = out;
       }
     }
 
-    console.log("재입고 확인 완료");
+    console.log("체크 완료");
   } catch (e) {
-    console.error("재입고 확인 에러:", e);
+    console.log("에러:", e);
   } finally {
     isRunning = false;
   }
 }
 
-async function startBot() {
-  console.log("텔레그램 재입고 봇 시작");
+// 시작
+async function start() {
+  console.log("The Vault bot start");
 
-  await checkRestock();
-  setInterval(checkRestock, 180000); // 3분
+  await checkStock();
+  setInterval(checkStock, 180000); // 3분
 }
 
-startBot();
+start();
