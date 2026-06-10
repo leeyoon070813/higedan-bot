@@ -121,8 +121,10 @@ https://thevault.bstage.in/shop/kr/products/${productId}`;
 async function start() {
   console.log("The Vault bot start");
 
+  await testTelegram(); // 테스트 알림
+
   await checkStock();
-  setInterval(checkStock, 180000); // 3분
+  setInterval(checkStock, 60000); // 1분
 }
 
 start();
