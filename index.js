@@ -6,11 +6,11 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 const PORT = process.env.PORT || 10000;
 
-// 감시 대상 상품
+// 감시 상품
 const PRODUCTS = [157, 158, 159, 162, 163, 166];
 
-// 6/20 (N), 6/21 (P)
-const GROUP_KEYS = [
+// 세션 (6/20, 6/21)
+const GROUPS = [
   { key: "01KTJEB74R10YM86EW4G97GX5N", label: "6/20" },
   { key: "01KTJEB74R10YM86EW4G97GX5P", label: "6/21" }
 ];
@@ -26,7 +26,7 @@ app.listen(PORT, () => {
 });
 
 // 상태 저장
-let lastState = {};
+const lastState = {};
 let isRunning = false;
 
 // sleep
@@ -34,37 +34,43 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // 텔레그램 전송
 async function sendTelegram(text) {
-  const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_CHAT_ID,
+        text,
+        disable_web_page_preview: false
+      })
+    });
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: TELEGRAM_CHAT_ID,
-      text,
-      disable_web_page_preview: false
-    })
-  });
-
-  if (!res.ok) {
-    console.log(await res.text());
+    if (!res.ok) {
+      console.log("Telegram error:", await res.text());
+    }
+  } catch (e) {
+    console.log("Telegram exception:", e.message);
   }
 }
 
 // API 호출
 async function fetchProduct(productId, groupKey) {
-  const url = `https://thevault.bstage.in/svc/shop/api/v1/products/${productId}/options?inventoryItemGroupKey=${groupKey}`;
+  try {
+    const url = `https://thevault.bstage.in/svc/shop/api/v1/products/${productId}/options?inventoryItemGroupKey=${groupKey}`;
 
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-      "Accept": "application/json"
-    }
-  });
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json"
+      }
+    });
 
-  if (!res.ok) return null;
+    if (!res.ok) return null;
 
-  return res.json();
+    return await res.json();
+  } catch (e) {
+    return null;
+  }
 }
 
 // 재고 체크
@@ -74,15 +80,12 @@ async function checkStock() {
 
   try {
     for (const productId of PRODUCTS) {
-      for (const group of GROUP_KEYS) {
+      for (const group of GROUPS) {
         const data = await fetchProduct(productId, group.key);
-        if (!data || !data.options) continue;
+        if (!data || !data.options || !data.options[0]) continue;
 
-        const option = data.options[0];
-	const out = option.outOfStock;
-	const key = `${productId}_${group.key}`;
-
-	console.log(productId, group.label, out);
+        const out = data.options[0].outOfStock;
+        const key = `${productId}_${group.key}`;
 
         // 최초 상태 저장
         if (lastState[key] === undefined) {
@@ -90,17 +93,22 @@ async function checkStock() {
           continue;
         }
 
+        // 변화 로그 (필요할 때만)
+        if (lastState[key] !== out) {
+          console.log(`변화: ${productId} ${group.label} ${lastState[key]} → ${out}`);
+        }
+
         // 품절(true) → 재입고(false)
         if (lastState[key] === true && out === false) {
-          const msg =
+          await sendTelegram(
 `🎉 재입고 감지
 
-상품: ${data.productName}
+상품ID: ${productId}
 날짜: ${group.label}
-https://thevault.bstage.in/shop/kr/products/${productId}`;
+https://thevault.bstage.in/shop/kr/products/${productId}`
+          );
 
-          await sendTelegram(msg);
-          console.log("재입고:", productId, group.label);
+          console.log(`🔥 재입고: ${productId} (${group.label})`);
 
           await sleep(1000);
         }
@@ -111,7 +119,7 @@ https://thevault.bstage.in/shop/kr/products/${productId}`;
 
     console.log("체크 완료");
   } catch (e) {
-    console.log("에러:", e);
+    console.log("check error:", e.message);
   } finally {
     isRunning = false;
   }
@@ -121,10 +129,11 @@ https://thevault.bstage.in/shop/kr/products/${productId}`;
 async function start() {
   console.log("The Vault bot start");
 
-  await testTelegram(); // 테스트 알림
-
+  // 즉시 1회 실행
   await checkStock();
-  setInterval(checkStock, 60000); // 1분
+
+  // 1분 주기
+  setInterval(checkStock, 60000);
 }
 
 start();
